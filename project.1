@@ -1,3 +1,448 @@
-# sivion-s-smart-AI
-this is changed ,hello...
-mano selvan
+import cv2
+from ultralytics import YOLO
+import numpy as np
+import os
+from datetime import datetime
+import json
+from pathlib import Path
+
+class AITrafficDetectionSystem:
+    def __init__(self):
+        """Initialize AI Traffic Detection System"""
+        print("🚦 AI TRAFFIC DETECTION SYSTEM - SIH 2025")
+        print("="*60)
+        
+        # Create project folders
+        self.setup_folders()
+        
+        # Load YOLO AI model
+        print("🤖 Loading AI Detection Model...")
+        self.model = YOLO('yolov8n.pt')  # Auto-downloads if needed
+        print("✅ AI Model Loaded Successfully")
+        
+        # Vehicle types with detection info
+        self.vehicle_types = {
+            2: {
+                'name': 'CAR',
+                'color': (0, 255, 0),      # Green box
+                'count': 0,
+                'confidence_sum': 0.0
+            },
+            3: {
+                'name': 'MOTORCYCLE', 
+                'color': (255, 0, 255),    # Magenta box
+                'count': 0,
+                'confidence_sum': 0.0
+            },
+            5: {
+                'name': 'BUS',
+                'color': (0, 0, 255),      # Red box
+                'count': 0,
+                'confidence_sum': 0.0
+            },
+            7: {
+                'name': 'TRUCK',
+                'color': (255, 255, 0),    # Cyan box
+                'count': 0,
+                'confidence_sum': 0.0
+            }
+        }
+        
+        # Detection statistics
+        self.reset_statistics()
+    
+    def setup_folders(self):
+        """Create necessary folders"""
+        folders = ['input_videos', 'output_videos', 'models', 'detection_reports']
+        
+        for folder in folders:
+            Path(folder).mkdir(exist_ok=True)
+        
+        print("📁 Project folders created")
+    
+    def reset_statistics(self):
+        """Reset all detection statistics"""
+        self.stats = {
+            'total_frames': 0,
+            'total_vehicles': 0,
+            'processing_time': 0.0,
+            'average_confidence': 0.0
+        }
+        
+        # Reset vehicle counts
+        for vehicle_id in self.vehicle_types:
+            self.vehicle_types[vehicle_id]['count'] = 0
+            self.vehicle_types[vehicle_id]['confidence_sum'] = 0.0
+    
+    def draw_detection_box(self, frame, x1, y1, x2, y2, confidence, class_id):
+        """Draw bounding box with vehicle type and confidence percentage"""
+        
+        if class_id not in self.vehicle_types:
+            return frame
+        
+        vehicle_info = self.vehicle_types[class_id]
+        color = vehicle_info['color']
+        vehicle_name = vehicle_info['name']
+        
+        # Convert confidence to percentage
+        confidence_percentage = confidence * 100
+        
+        # Draw bounding box rectangle
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
+        
+        # Create label with vehicle type and confidence
+        label = f"{vehicle_name}: {confidence_percentage:.1f}%"
+        
+        # Calculate label size for background rectangle
+        (label_width, label_height), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
+        )
+        
+        # Draw label background rectangle
+        cv2.rectangle(
+            frame, 
+            (x1, y1 - label_height - 10),
+            (x1 + label_width + 10, y1),
+            color,
+            -1  # Filled rectangle
+        )
+        
+        # Draw label text
+        cv2.putText(
+            frame,
+            label,
+            (x1 + 5, y1 - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 0),  # Black text
+            2
+        )
+        
+        return frame
+    
+    def create_info_panel(self, width, height, frame_num, total_frames, current_detections):
+        """Create information panel showing detection statistics"""
+        
+        # Create dark panel
+        panel_height = 180
+        panel = np.zeros((panel_height, width, 3), dtype=np.uint8)
+        panel[:] = (30, 30, 30)  # Dark gray background
+        
+        # Title
+        cv2.putText(panel, "AI TRAFFIC DETECTION SYSTEM - SIH 2025", 
+                   (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+        
+        # Processing progress
+        progress = (frame_num / total_frames) * 100
+        cv2.putText(panel, f"Processing: {progress:.1f}% | Frame: {frame_num:,}/{total_frames:,}", 
+                   (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Current frame detections
+        cv2.putText(panel, f"Current Frame Vehicles: {current_detections}", 
+                   (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Vehicle type breakdown with percentages
+        y_pos = 120
+        x_positions = [20, 250, 480, 710]
+        
+        total_vehicles = sum(vehicle['count'] for vehicle in self.vehicle_types.values())
+        
+        for i, (class_id, vehicle_info) in enumerate(self.vehicle_types.items()):
+            if i < len(x_positions):
+                count = vehicle_info['count']
+                
+                # Calculate percentage of total vehicles
+                percentage = (count / total_vehicles * 100) if total_vehicles > 0 else 0
+                
+                # Calculate average confidence for this vehicle type
+                avg_confidence = (vehicle_info['confidence_sum'] / count * 100) if count > 0 else 0
+                
+                text = f"{vehicle_info['name']}: {count} ({percentage:.1f}%)"
+                color = vehicle_info['color']
+                
+                cv2.putText(panel, text, (x_positions[i], y_pos), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                
+                # Show average confidence below
+                conf_text = f"Avg: {avg_confidence:.1f}%"
+                cv2.putText(panel, conf_text, (x_positions[i], y_pos + 25), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        
+        # System info
+        cv2.putText(panel, f"Total Detected: {total_vehicles} | AI Model: YOLOv8 | Confidence Threshold: 40%", 
+                   (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        
+        return panel
+    
+    def process_video_with_detection(self, input_video_path, confidence_threshold=0.4):
+        """Main function to process video with AI detection"""
+        
+        print(f"\n🎬 PROCESSING VIDEO: {os.path.basename(input_video_path)}")
+        print("="*60)
+        
+        # Reset statistics for new video
+        self.reset_statistics()
+        
+        # Open input video
+        cap = cv2.VideoCapture(input_video_path)
+        
+        if not cap.isOpened():
+            print(f"❌ ERROR: Cannot open video file: {input_video_path}")
+            return None
+        
+        # Get video properties
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps
+        
+        print(f"📹 VIDEO ANALYSIS:")
+        print(f"   📐 Resolution: {width} x {height}")
+        print(f"   ⏱️ Duration: {duration:.1f} seconds")
+        print(f"   🎞️ Total Frames: {total_frames:,}")
+        print(f"   🔄 Frame Rate: {fps} FPS")
+        print(f"   🎯 Confidence Threshold: {confidence_threshold*100}%")
+        
+        # Create output video path
+        timestamp = datetime.now().strftime("%m%d_%H%M%S")
+        input_name = Path(input_video_path).stem
+        output_filename = f"AI_Traffic_Detection_{input_name}_{timestamp}.mp4"
+        output_path = f"output_videos/{output_filename}"
+        
+        # Setup video writer with info panel space
+        output_height = height + 180  # Add space for info panel
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, output_height))
+        
+        print(f"\n🔄 STARTING AI DETECTION ANALYSIS...")
+        print("   🎯 Detecting: Cars, Motorcycles, Buses, Trucks")
+        print("   📊 Calculating: Bounding Boxes, Confidence %, Vehicle Types")
+        
+        # Processing variables
+        frame_count = 0
+        start_time = datetime.now()
+        
+        # Create preview window
+        cv2.namedWindow('AI Traffic Detection - Live Processing', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('AI Traffic Detection - Live Processing', 1200, 900)
+        
+        # Process each frame
+        while True:
+            ret, frame = cap.read()
+            
+            if not ret:
+                print("📄 End of video reached")
+                break
+            
+            frame_count += 1
+            self.stats['total_frames'] = frame_count
+            
+            # Run AI detection on current frame
+            results = self.model(
+                frame,
+                classes=[2, 3, 5, 7],  # Vehicle classes only
+                conf=confidence_threshold,  # Confidence threshold
+                verbose=False
+            )
+            
+            # Process detections
+            current_frame_detections = 0
+            
+            if results[0].boxes is not None:
+                for box in results[0].boxes:
+                    # Extract detection information
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())  # Bounding box coordinates
+                    confidence = float(box.conf[0])  # Confidence score
+                    class_id = int(box.cls[0])  # Vehicle class ID
+                    
+                    # Draw bounding box with vehicle type and confidence percentage
+                    frame = self.draw_detection_box(frame, x1, y1, x2, y2, confidence, class_id)
+                    
+                    # Update statistics
+                    if class_id in self.vehicle_types:
+                        self.vehicle_types[class_id]['count'] += 1
+                        self.vehicle_types[class_id]['confidence_sum'] += confidence
+                        current_frame_detections += 1
+            
+            # Update total vehicle count
+            self.stats['total_vehicles'] = sum(vehicle['count'] for vehicle in self.vehicle_types.values())
+            
+            # Create information panel
+            info_panel = self.create_info_panel(width, height, frame_count, total_frames, current_frame_detections)
+            
+            # Combine original frame with info panel
+            final_frame = np.vstack([frame, info_panel])
+            
+            # Write to output video
+            out.write(final_frame)
+            
+            # Show live preview
+            cv2.imshow('AI Traffic Detection - Live Processing', final_frame)
+            
+            # Allow user to quit preview (processing continues)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                print("   👁️ Preview closed (processing continues...)")
+                cv2.destroyAllWindows()
+            
+            # Show progress every 100 frames
+            if frame_count % 100 == 0:
+                progress = (frame_count / total_frames) * 100
+                elapsed = (datetime.now() - start_time).seconds
+                processing_fps = frame_count / elapsed if elapsed > 0 else 0
+                
+                print(f"   📊 Progress: {progress:.1f}% | Processing: {processing_fps:.1f} FPS | Frame Vehicles: {current_frame_detections}")
+        
+        # Cleanup
+        cap.release()
+        out.release()
+        cv2.destroyAllWindows()
+        
+        # Calculate final statistics
+        processing_time = (datetime.now() - start_time).seconds
+        self.stats['processing_time'] = processing_time
+        
+        # Calculate overall average confidence
+        total_confidence = sum(vehicle['confidence_sum'] for vehicle in self.vehicle_types.values())
+        total_detections = self.stats['total_vehicles']
+        self.stats['average_confidence'] = (total_confidence / total_detections * 100) if total_detections > 0 else 0
+        
+        # Generate detection report
+        report_path = self.generate_detection_report(input_video_path, output_path)
+        
+        # Display final results
+        self.display_final_results(output_path, report_path)
+        
+        return output_path
+    
+    def generate_detection_report(self, input_path, output_path):
+        """Generate comprehensive detection report"""
+        
+        # Calculate vehicle percentages and average confidences
+        total_vehicles = self.stats['total_vehicles']
+        vehicle_analysis = {}
+        
+        for class_id, vehicle_info in self.vehicle_types.items():
+            count = vehicle_info['count']
+            percentage = (count / total_vehicles * 100) if total_vehicles > 0 else 0
+            avg_confidence = (vehicle_info['confidence_sum'] / count * 100) if count > 0 else 0
+            
+            vehicle_analysis[vehicle_info['name']] = {
+                'count': count,
+                'percentage_of_total': round(percentage, 2),
+                'average_confidence_percentage': round(avg_confidence, 2)
+            }
+        
+        # Create comprehensive report
+        report_data = {
+            'detection_summary': {
+                'input_video': os.path.basename(input_path),
+                'output_video': os.path.basename(output_path),
+                'processing_date': datetime.now().isoformat(),
+                'total_frames_processed': self.stats['total_frames'],
+                'total_vehicles_detected': total_vehicles,
+                'processing_time_seconds': self.stats['processing_time'],
+                'average_detection_confidence': round(self.stats['average_confidence'], 2),
+                'processing_fps': round(self.stats['total_frames'] / self.stats['processing_time'], 2) if self.stats['processing_time'] > 0 else 0
+            },
+            'vehicle_type_analysis': vehicle_analysis,
+            'system_specifications': {
+                'ai_model': 'YOLOv8n',
+                'confidence_threshold': '40%',
+                'detection_classes': 'Cars, Motorcycles, Buses, Trucks',
+                'bounding_box_format': 'Colored rectangles with confidence percentages'
+            }
+        }
+        
+        # Save report
+        timestamp = datetime.now().strftime("%m%d_%H%M%S")
+        report_filename = f"AI_Traffic_Detection_Report_{timestamp}.json"
+        report_path = f"detection_reports/{report_filename}"
+        
+        with open(report_path, 'w') as f:
+            json.dump(report_data, f, indent=4)
+        
+        return report_path
+    
+    def display_final_results(self, output_video_path, report_path):
+        """Display final detection results"""
+        
+        print("\n" + "="*80)
+        print("🎉 AI TRAFFIC DETECTION COMPLETED!")
+        print("="*80)
+        
+        print(f"\n📊 DETECTION RESULTS:")
+        print(f"   🎞️ Frames Processed: {self.stats['total_frames']:,}")
+        print(f"   🚗 Total Vehicles Detected: {self.stats['total_vehicles']:,}")
+        print(f"   ⏱️ Processing Time: {self.stats['processing_time']} seconds")
+        print(f"   🎯 Average Confidence: {self.stats['average_confidence']:.1f}%")
+        
+        print(f"\n📈 VEHICLE TYPE BREAKDOWN:")
+        total_vehicles = self.stats['total_vehicles']
+        
+        for class_id, vehicle_info in self.vehicle_types.items():
+            count = vehicle_info['count']
+            percentage = (count / total_vehicles * 100) if total_vehicles > 0 else 0
+            avg_confidence = (vehicle_info['confidence_sum'] / count * 100) if count > 0 else 0
+            
+            print(f"   {vehicle_info['name']:12}: {count:,} vehicles ({percentage:.1f}%) - Avg Confidence: {avg_confidence:.1f}%")
+        
+        print(f"\n📁 OUTPUT FILES:")
+        print(f"   🎬 Processed Video: {output_video_path}")
+        print(f"   📋 Detection Report: {report_path}")
+        
+        print(f"\n🏆 READY FOR SIH 2025 DEMONSTRATION!")
+        print("   ✅ Bounding boxes with vehicle types")
+        print("   ✅ Confidence percentages for each detection") 
+        print("   ✅ Complete statistical analysis")
+        print("   ✅ Professional video output")
+    
+    def run_ai_traffic_system(self, input_video_path=None):
+        """Main function to run the complete AI traffic system"""
+        
+        if input_video_path is None:
+            # Find video in input_videos folder
+            input_folder = Path("input_videos")
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv']
+            
+            video_files = []
+            for ext in video_extensions:
+                video_files.extend(list(input_folder.glob(f"*{ext}")))
+            
+            if not video_files:
+                print("❌ No video files found!")
+                print("\n📋 TO GET STARTED:")
+                print("1. Place your traffic video in 'input_videos' folder")
+                print("2. Supported formats: .mp4, .avi, .mov, .mkv")
+                print("3. Run this script again")
+                return None
+            
+            input_video_path = str(video_files[0])
+            print(f"📹 Found video: {os.path.basename(input_video_path)}")
+        
+        # Process the video with AI detection
+        result = self.process_video_with_detection(input_video_path)
+        
+        return result
+
+
+# MAIN EXECUTION
+if __name__ == "__main__":
+    print("🚦 SIH 2025 - AI TRAFFIC DETECTION SYSTEM")
+    print("="*80)
+    print("🎯 Features: Bounding Boxes | Vehicle Types | Confidence % | Complete Analysis")
+    print("="*80)
+    
+    # Create AI Traffic Detection System
+    ai_system = AITrafficDetectionSystem()
+    
+    # Run the system (will auto-find video in input_videos folder)
+    result = ai_system.run_ai_traffic_system()
+    
+    if result:
+        print(f"\n✅ SUCCESS! Check your output: {result}")
+    else:
+        print(f"\n❌ Please add a traffic video to 'input_videos' folder and try again")
+    
+    input("\n🏁 Press Enter to exit...")
