@@ -1,0 +1,4 @@
+train: /content/drive/MyDrive/path/to/your/training/images
+val: /content/drive/MyDrive/path/to/your/training/images
+nc: 3 # number of classes
+names: ['class1', 'class2', ...] # list of class names
